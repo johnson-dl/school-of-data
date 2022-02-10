@@ -1,0 +1,79 @@
+---
+title: "Responsible Use of Demographic Data"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(here)
+theme_set(theme_light())
+
+
+maths <- read_csv(here("data/2006-2012_Math_Test_Results_-_School_-_Ethnicity.csv")) %>%
+  janitor::clean_names()
+
+maths$demographic <- as.factor(maths$demographic)
+levels(maths$demographic)
+```
+
+
+
+
+```{r}
+directory <- read_csv(here("data/2017_DOE_High_School_Directory.csv")) %>%
+  janitor::clean_names()
+
+
+directory %>%
+  ggplot(aes(longitude, latitude)) +
+  geom_point()
+```
+
+
+```{r}
+maths_and_schools <- maths %>%
+  inner_join(directory)
+
+
+maths_and_schools %>%
+  ggplot(aes(longitude, latitude)) +
+  geom_point()
+```
+
+
+```{r}
+sum(is.na(directory$latitude))
+
+sum(is.na(directory$longitude))
+```
+
+
+
+
+#Regex bullshit I'm still sorting out
+```{r}
+directory %>%
+  select(location)
+
+directory %>%
+  select(location) %>%
+  separate(col = location, sep = " ",
+           into = c("col1", "col2"))
+
+directory %>%
+  select(location) %>%
+  grep("/\([^()]+\)/g")
+
+
+directory$latitude
+
+#shit don't work
+directory %>%
+  mutate(long_and_lat = regmatches(directory$location, gregexpr("(?=\\().*?(?<=\\))"))) %>%
+  select(long_and_lat)
+
+
+#shit work - but no work with dataframe - shit :( 
+regmatches(directory$location, gregexpr("(?=\\().*?(?<=\\))", directory$location, perl=T))[[1]]
+```
+
