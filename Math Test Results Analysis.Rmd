@@ -16,8 +16,11 @@ We'll also be using the `dplyr` and `ggplot` libraries for analysis & visualizat
 ```{r}
 #install.packages("tidyverse") # skip if already done
 library(tidyverse)
-math_test_results <- read.csv("~/Documents/github/school-of-data/2006-2012_Math_Test_Results_-_School_-_Ethnicity.csv", na.strings="s")
-head(math_test_results)
+library(here)
+library(broom)
+math_test_results <- read.csv("data/2006-2012_Math_Test_Results_-_School_-_Ethnicity.csv", na.strings="s") %>%
+  janitor::clean_names()
+
 ```
 
 ## Plot the data by race/ethnicity
@@ -25,11 +28,20 @@ head(math_test_results)
 This is a variation on the basic line graph of math scores over time. What does it tell us?
 
 ```{r}
+theme_set(theme_light())
 math_test_results %>%
-  group_by(Year, Demographic) %>%
-  summarize(mean_score = mean(`Mean.Scale.Score`, na.rm=TRUE)) %>%
-  ggplot(aes(x=Year, y=mean_score, group=Demographic, color=Demographic)) +
-    geom_line()
+  group_by(year, demographic) %>%
+  summarize(mean_score = mean(mean_scale_score, na.rm=TRUE)) %>%
+  ggplot(aes(x=year, y=mean_score, group=demographic, color=demographic)) +
+  geom_line() +
+  labs(x = "Year",
+       y = "Average math scores")
+
+
+math_test_results %>%
+  #filter(year == 2012) %>%
+  group_by(year, demographic) %>%
+  summarize(mean_score = mean(mean_scale_score, na.rm=TRUE))# %>% gt::gt()
 ```
 
 # Augmenting the existing data
@@ -55,23 +67,83 @@ res <- GET("https://data.cityofnewyork.us/resource/6kcb-9g8d.json")
 school_info <- fromJSON(rawToChar(res$content))
 names(school_info)
 ```
+# relevel demographic - compare to white
+```{r}
+demo_levels <- c("White", "Black", "Hispanic", "Asian")
+math_test_schools$demographic <-  fct_relevel(math_test_schools$demographic, demo_levels)
+```
 
 
 ```{r}
 math_test_schools <- math_test_results %>%
-  inner_join(school_info, by=c(DBN="schooldbn")) %>%
+  inner_join(school_info, by=c(dbn="schooldbn")) %>%
   mutate(mathprof = as.numeric(mathprof),
          totalstudents = as.numeric(totalstudents)) %>%
   mutate(math_t_student_ratio = mathprof/totalstudents) 
 
-theme_set(theme_light())
 math_test_schools %>%
   filter(math_t_student_ratio < .5) %>%
-  ggplot(aes(x = math_t_student_ratio, y = Mean.Scale.Score, color = Demographic)) +
+  ggplot(aes(x = math_t_student_ratio, y = mean_scale_score, color = demographic)) +
   geom_point() +
   geom_smooth(method = "lm") +
-  facet_wrap(~Demographic)
+  facet_wrap(~demographic)
 ```
+
+
+
+
+# AYO LOOK AT THIS SHIT!
+```{r}
+library(lmerTest)
+
+performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | demographic), data = math_test_schools))
+
+performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood), data = math_test_schools))
+
+
+performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood) +
+                        (math_t_student_ratio | demographic), data = math_test_schools), by_group = TRUE)
+
+performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (1 | neighborhood) +
+                        (1| demographic), data = math_test_schools), by_group = TRUE)
+```
+#Justified in using ri/rs for both models
+```{r}
+ri_neigh <- lmer(mean_scale_score ~ math_t_student_ratio + (1 | neighborhood), data = math_test_schools)
+
+ri_rs_neigh <- lmer(mean_scale_score ~ math_t_student_ratio  + (math_t_student_ratio | neighborhood),
+                    data = math_test_schools)
+
+anova(ri_neigh, ri_rs_neigh)
+
+
+ri_demo <- lmer(mean_scale_score ~ math_t_student_ratio + (1 | demographic), data = math_test_schools)
+
+ri_rs_demo <- lmer(mean_scale_score ~ math_t_student_ratio  + (math_t_student_ratio | demographic),
+                    data = math_test_schools)
+
+anova(ri_demo, ri_rs_demo)
+```
+
+```{r}
+eugenics_bullshit  <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | demographic), 
+                  data = math_test_schools)
+
+proper_shit  <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood), 
+                      data = math_test_schools)
+
+fuck_off_eugenics <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood) +
+                        (math_t_student_ratio | demographic), data = math_test_schools)
+
+anova(eugenics_bullshit, proper_shit,  fuck_off_eugenics)
+```
+
+# Probably better to compare ICCs from each individal model with one random slope since we have innacurate ICCs with random slopes. 
+```{r}
+performance::icc(fuck_off_eugenics, by_group = TRUE)
+```
+
+
 
 
 ```{r}
@@ -91,4 +163,51 @@ cor.test(df1$math_t_student_ratio, df1$Mean.Scale.Score)
 ```
 
 
+#Model comparison and coefficient plot
 ```{r}
+simple_model <- lm(mean_scale_score ~ demographic + math_t_student_ratio, data = math_test_schools)
+
+interaction_model <- lm(mean_scale_score ~ demographic* math_t_student_ratio, data = math_test_schools)
+
+anova(simple_model, interaction_model)
+
+
+(coefficient_table <- interaction_model %>%
+  broom::tidy(conf.int = TRUE))
+
+
+coefficient_table %>%
+  filter(term != "(Intercept)") %>%
+  arrange(desc(estimate)) %>%
+  ggplot(aes(estimate, term)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  geom_vline(xintercept = 0, color = "red")
+```
+
+
+
+build demo and math scores hierachically
+```{r}
+math_test_schoolz <- math_test_schools %>%
+  filter(!is.na(mean_scale_score),
+         !is.na(demographic), !is.na(math_t_student_ratio))
+
+ri <- lmer(mean_scale_score ~ 1 + (1|demographic), data = math_test_schoolz)
+
+rs <- lmer(mean_scale_score ~ math_t_student_ratio + (1 | demographic), data = math_test_schoolz)
+
+ri_rs <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | demographic), 
+     data = math_test_schoolz)
+
+#compare models
+anova(ri, rs, ri_rs)
+```
+
+```{r}
+broom.mixed::tidy(ri_rs, conf.int = TRUE)
+
+performance::icc(ri, by_group = TRUE)
+performance::icc(ri_rs)
+```
+
