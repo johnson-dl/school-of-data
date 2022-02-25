@@ -1,0 +1,94 @@
+---
+title: "School of Data -- Math Test Results"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Importing & exploring the data
+
+Let's import the CSV file, which was downloaded from [NYC Open Data](https://data.cityofnewyork.us/Education/2006-2012-Math-Test-Results-School-Ethnicity/3tfu-x2qk). 
+
+We'll also be using the `dplyr` and `ggplot` libraries for analysis & visualization, which are part of the `tidyverse` We strongly recommend using `tidyverse` modules where available.
+
+```{r}
+#install.packages("tidyverse") # skip if already done
+library(tidyverse)
+math_test_results <- read.csv("~/Documents/github/school-of-data/2006-2012_Math_Test_Results_-_School_-_Ethnicity.csv", na.strings="s")
+head(math_test_results)
+```
+
+## Plot the data by race/ethnicity
+
+This is a variation on the basic line graph of math scores over time. What does it tell us?
+
+```{r}
+math_test_results %>%
+  group_by(Year, Demographic) %>%
+  summarize(mean_score = mean(`Mean.Scale.Score`, na.rm=TRUE)) %>%
+  ggplot(aes(x=Year, y=mean_score, group=Demographic, color=Demographic)) +
+    geom_line()
+```
+
+# Augmenting the existing data
+
+Taking a look at the dataset again, we see there are a few key fields where we can augment our data with further information:
+- `DBN`
+- `Year`
+
+The `DBN` tells us the school code, which we can use to join to the "School Directory" datasets available with NYC Open Data. Those will give us additional metadata about the schools that we can use to better understand other factors contributing to math test results.
+
+```{r}
+head(math_test_results)
+```
+We'll use the `httr` library to pull in data directly from the NYC Open Data API. We're using it this time around for simplicity and to show multiple methods of importing data.
+
+```{r}
+#install.packages(c("httr", "jsonlite"))
+library(httr)
+library(jsonlite)
+library(stringr)
+
+res <- GET("https://data.cityofnewyork.us/resource/6kcb-9g8d.json")
+school_info <- fromJSON(rawToChar(res$content))
+names(school_info)
+```
+
+
+```{r}
+math_test_schools <- math_test_results %>%
+  inner_join(school_info, by=c(DBN="schooldbn")) %>%
+  mutate(mathprof = as.numeric(mathprof),
+         totalstudents = as.numeric(totalstudents)) %>%
+  mutate(math_t_student_ratio = mathprof/totalstudents) 
+
+theme_set(theme_light())
+math_test_schools %>%
+  filter(math_t_student_ratio < .5) %>%
+  ggplot(aes(x = math_t_student_ratio, y = Mean.Scale.Score, color = Demographic)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  facet_wrap(~Demographic)
+```
+
+
+```{r}
+summary(lm(Mean.Scale.Score ~ math_t_student_ratio, 
+           data = subset(math_test_schools[,
+                                           c("math_t_student_ratio", 
+                                             "Mean.Scale.Score", 
+                                             "Demographic")],
+                         Demographic == "White")))
+
+df1 <- subset(math_test_schools[, c("math_t_student_ratio", 
+                             "Mean.Scale.Score", 
+                             "Demographic")], Demographic == "White")
+
+cor.test(df1$math_t_student_ratio, df1$Mean.Scale.Score)
+        
+```
+
+
+```{r}
