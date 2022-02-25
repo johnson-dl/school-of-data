@@ -67,7 +67,18 @@ res <- GET("https://data.cityofnewyork.us/resource/6kcb-9g8d.json")
 school_info <- fromJSON(rawToChar(res$content))
 names(school_info)
 ```
-# relevel demographic - compare to white
+
+#Create main dataset - math results and school directory information
+```{r}
+math_test_schools <- math_test_results %>%
+  inner_join(school_info, by=c(dbn="schooldbn")) %>%
+  mutate(mathprof = as.numeric(mathprof),
+         totalstudents = as.numeric(totalstudents)) %>%
+  mutate(math_t_student_ratio = mathprof/totalstudents) 
+```
+
+
+# relevel demographic variable  - white as the referecne level
 ```{r}
 demo_levels <- c("White", "Black", "Hispanic", "Asian")
 math_test_schools$demographic <-  fct_relevel(math_test_schools$demographic, demo_levels)
@@ -75,12 +86,6 @@ math_test_schools$demographic <-  fct_relevel(math_test_schools$demographic, dem
 
 
 ```{r}
-math_test_schools <- math_test_results %>%
-  inner_join(school_info, by=c(dbn="schooldbn")) %>%
-  mutate(mathprof = as.numeric(mathprof),
-         totalstudents = as.numeric(totalstudents)) %>%
-  mutate(math_t_student_ratio = mathprof/totalstudents) 
-
 math_test_schools %>%
   filter(math_t_student_ratio < .5) %>%
   ggplot(aes(x = math_t_student_ratio, y = mean_scale_score, color = demographic)) +
@@ -92,22 +97,27 @@ math_test_schools %>%
 
 
 
-# AYO LOOK AT THIS SHIT!
+# Mixed Model approach - let's examine math scores with demographics or neighborhood as a nested factor
+
+#ICC for each model
 ```{r}
 library(lmerTest)
 
+#demographic vs neighborhood - single model
 performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | demographic), data = math_test_schools))
 
 performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood), data = math_test_schools))
 
 
+#demographics and neighborhood both as random effects
 performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood) +
                         (math_t_student_ratio | demographic), data = math_test_schools), by_group = TRUE)
 
+#random effect only - no random slope - demo wins in this instance - lets examine if random slope model is better
 performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (1 | neighborhood) +
                         (1| demographic), data = math_test_schools), by_group = TRUE)
 ```
-#Justified in using ri/rs for both models
+#Justified in using random intercept and random slope  for both models (demo and neighborhood)
 ```{r}
 ri_neigh <- lmer(mean_scale_score ~ math_t_student_ratio + (1 | neighborhood), data = math_test_schools)
 
@@ -125,22 +135,26 @@ ri_rs_demo <- lmer(mean_scale_score ~ math_t_student_ratio  + (math_t_student_ra
 anova(ri_demo, ri_rs_demo)
 ```
 
+
+comparison of models - full model with both random effects does better than each individual model with only one random effect
 ```{r}
-eugenics_bullshit  <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | demographic), 
+demo_alone  <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | demographic), 
                   data = math_test_schools)
 
-proper_shit  <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood), 
+neighborhood_alone  <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood), 
                       data = math_test_schools)
 
-fuck_off_eugenics <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood) +
+demo_and_neighborhood  <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | neighborhood) +
                         (math_t_student_ratio | demographic), data = math_test_schools)
 
-anova(eugenics_bullshit, proper_shit,  fuck_off_eugenics)
+
+anova(demo_alone, neighborhood_alone,  demo_and_neighborhood)
 ```
+
 
 # Probably better to compare ICCs from each individal model with one random slope since we have innacurate ICCs with random slopes. 
 ```{r}
-performance::icc(fuck_off_eugenics, by_group = TRUE)
+performance::icc(demo_and_neighborhood, by_group = TRUE)
 ```
 
 
@@ -163,7 +177,7 @@ cor.test(df1$math_t_student_ratio, df1$Mean.Scale.Score)
 ```
 
 
-#Model comparison and coefficient plot
+#Model comparison and coefficient plot - ols model
 ```{r}
 simple_model <- lm(mean_scale_score ~ demographic + math_t_student_ratio, data = math_test_schools)
 
@@ -183,31 +197,5 @@ coefficient_table %>%
   geom_point() +
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
   geom_vline(xintercept = 0, color = "red")
-```
-
-
-
-build demo and math scores hierachically
-```{r}
-math_test_schoolz <- math_test_schools %>%
-  filter(!is.na(mean_scale_score),
-         !is.na(demographic), !is.na(math_t_student_ratio))
-
-ri <- lmer(mean_scale_score ~ 1 + (1|demographic), data = math_test_schoolz)
-
-rs <- lmer(mean_scale_score ~ math_t_student_ratio + (1 | demographic), data = math_test_schoolz)
-
-ri_rs <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | demographic), 
-     data = math_test_schoolz)
-
-#compare models
-anova(ri, rs, ri_rs)
-```
-
-```{r}
-broom.mixed::tidy(ri_rs, conf.int = TRUE)
-
-performance::icc(ri, by_group = TRUE)
-performance::icc(ri_rs)
 ```
 
