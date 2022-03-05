@@ -7,27 +7,30 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+
 ## Importing & exploring the data
 
 Let's import the CSV file, which was downloaded from [NYC Open Data](https://data.cityofnewyork.us/Education/2006-2012-Math-Test-Results-School-Ethnicity/3tfu-x2qk). 
 
 We'll also be using the `dplyr` and `ggplot` libraries for analysis & visualization, which are part of the `tidyverse` We strongly recommend using `tidyverse` modules where available.
 
-```{r}
+```{r, echo=FALSE, message=FALSE}
 #install.packages("tidyverse") # skip if already done
 library(tidyverse)
+library(janitor)
 library(here)
 library(broom)
+
+
 math_test_results <- read.csv("data/2006-2012_Math_Test_Results_-_School_-_Ethnicity.csv", na.strings="s") %>%
   janitor::clean_names()
-
 ```
 
 ## Plot the data by race/ethnicity
 
 This is a variation on the basic line graph of math scores over time. What does it tell us?
-
-```{r}
+```{r, echo=FALSE, message=FALSE}
 theme_set(theme_light())
 math_test_results %>%
   group_by(year, demographic) %>%
@@ -36,13 +39,17 @@ math_test_results %>%
   geom_line() +
   labs(x = "Year",
        y = "Average math scores")
-
-
-math_test_results %>%
-  #filter(year == 2012) %>%
-  group_by(year, demographic) %>%
-  summarize(mean_score = mean(mean_scale_score, na.rm=TRUE))# %>% gt::gt()
 ```
+
+Creating a summary table - typically sent along with a graph of this sort or in some excel pivot table
+```{r,echo=FALSE, message=FALSE}
+math_test_results %>%
+  filter(year == 2012) %>%
+  group_by(year, demographic) %>%
+  summarize(mean_score = mean(mean_scale_score, na.rm=TRUE)) %>% 
+  gt::gt()
+```
+
 
 # Augmenting the existing data
 
@@ -52,13 +59,14 @@ Taking a look at the dataset again, we see there are a few key fields where we c
 
 The `DBN` tells us the school code, which we can use to join to the "School Directory" datasets available with NYC Open Data. Those will give us additional metadata about the schools that we can use to better understand other factors contributing to math test results.
 
-```{r}
-head(math_test_results)
+```{r, echo=FALSE}
+head(math_test_results) %>%
+  gt::gt()
 ```
 We'll use the `httr` library to pull in data directly from the NYC Open Data API. We're using it this time around for simplicity and to show multiple methods of importing data.
 
-```{r}
-#install.packages(c("httr", "jsonlite"))
+```{r,echo=FALSE, message=FALSE}
+##install.packages(c("httr", "jsonlite"))
 library(httr)
 library(jsonlite)
 library(stringr)
@@ -68,8 +76,8 @@ school_info <- fromJSON(rawToChar(res$content))
 names(school_info)
 ```
 
-#Create main dataset - math results and school directory information
-```{r}
+Creating a main dataset - math results and school directory information
+```{r, message=FALSE}
 math_test_schools <- math_test_results %>%
   inner_join(school_info, by=c(dbn="schooldbn")) %>%
   mutate(mathprof = as.numeric(mathprof),
@@ -78,14 +86,15 @@ math_test_schools <- math_test_results %>%
 ```
 
 
-# relevel demographic variable  - white as the referecne level
-```{r}
+```{r,include=FALSE}
+# re level demographic variable
+
 demo_levels <- c("White", "Black", "Hispanic", "Asian")
 math_test_schools$demographic <-  fct_relevel(math_test_schools$demographic, demo_levels)
 ```
 
 
-```{r}
+```{r,echo=FALSE, message=FALSE}
 math_test_schools %>%
   filter(math_t_student_ratio < .5) %>%
   ggplot(aes(x = math_t_student_ratio, y = mean_scale_score, color = demographic)) +
@@ -100,7 +109,7 @@ math_test_schools %>%
 # Mixed Model approach - let's examine math scores with demographics or neighborhood as a nested factor
 
 #ICC for each model
-```{r}
+```{r,include=FALSE}
 library(lmerTest)
 
 #demographic vs neighborhood - single model
@@ -117,8 +126,9 @@ performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_
 performance::icc(lmer(mean_scale_score ~ math_t_student_ratio + (1 | neighborhood) +
                         (1| demographic), data = math_test_schools), by_group = TRUE)
 ```
+
+```{r, include=FALSE}
 #Justified in using random intercept and random slope  for both models (demo and neighborhood)
-```{r}
 ri_neigh <- lmer(mean_scale_score ~ math_t_student_ratio + (1 | neighborhood), data = math_test_schools)
 
 ri_rs_neigh <- lmer(mean_scale_score ~ math_t_student_ratio  + (math_t_student_ratio | neighborhood),
@@ -136,8 +146,9 @@ anova(ri_demo, ri_rs_demo)
 ```
 
 
-comparison of models - full model with both random effects does better than each individual model with only one random effect
-```{r}
+
+```{r,include=FALSE}
+#comparison of models - full model with both random effects does better than each #individual model with only one random effect
 demo_alone  <- lmer(mean_scale_score ~ math_t_student_ratio + (math_t_student_ratio | demographic), 
                   data = math_test_schools)
 
@@ -152,33 +163,36 @@ anova(demo_alone, neighborhood_alone,  demo_and_neighborhood)
 ```
 
 
-# Probably better to compare ICCs from each individal model with one random slope since we have innacurate ICCs with random slopes. 
+Neighborhood as a random effect explains more variance in the math score data compared to demographics 
 ```{r}
+performance::icc(neighborhood_alone)
+performance::icc(demo_alone)
 performance::icc(demo_and_neighborhood, by_group = TRUE)
 ```
 
 
 
 
-```{r}
-summary(lm(Mean.Scale.Score ~ math_t_student_ratio, 
+```{r,include=FALSE}
+summary(lm(mean_scale_score ~ math_t_student_ratio, 
            data = subset(math_test_schools[,
                                            c("math_t_student_ratio", 
-                                             "Mean.Scale.Score", 
-                                             "Demographic")],
-                         Demographic == "White")))
+                                             "mean_scale_score", 
+                                             "demographic")],
+                         demographic == "White")))
 
 df1 <- subset(math_test_schools[, c("math_t_student_ratio", 
-                             "Mean.Scale.Score", 
-                             "Demographic")], Demographic == "White")
+                             "mean_scale_score", 
+                             "demographic")], demographic == "White")
 
-cor.test(df1$math_t_student_ratio, df1$Mean.Scale.Score)
+cor.test(df1$math_t_student_ratio, df1$mean_scale_score)
         
 ```
 
 
+
+```{r,include=FALSE}
 #Model comparison and coefficient plot - ols model
-```{r}
 simple_model <- lm(mean_scale_score ~ demographic + math_t_student_ratio, data = math_test_schools)
 
 interaction_model <- lm(mean_scale_score ~ demographic* math_t_student_ratio, data = math_test_schools)
